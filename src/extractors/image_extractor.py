@@ -72,6 +72,12 @@ class ImageExtractor(BaseExtractor):
         has_decision = bool(ACCEPTED_DECISION.search(text))
         has_end = any(is_end_anchor(l.strip()) for l in fragment_lines)
 
+        # Аналогично изображениям: блок может быть разбит так, что точная
+        # фраза «В результате голосования» не распознаётся, но итоговый
+        # якорь присутствует.
+        if not has_voting and (has_decision or has_end):
+            has_voting = True
+
         confidence = self.calculate_confidence(
             has_start=True,
             has_table=False,

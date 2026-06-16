@@ -75,6 +75,12 @@ class PdfExtractor(BaseExtractor):
         has_decision = bool(ACCEPTED_DECISION.search(text))
         has_end = any(is_end_anchor(l.strip()) for l in fragment_lines)
 
+        # Аналогично DOCX: если распознано решение/конечный якорь,
+        # считаем блок голосования присутствующим, даже если точная фраза
+        # «В результате голосования» не попала в OCR/разметку.
+        if not has_voting and (has_decision or has_end):
+            has_voting = True
+
         confidence = self.calculate_confidence(
             has_start=True,
             has_table=False,

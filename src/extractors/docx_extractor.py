@@ -100,6 +100,13 @@ class DocxExtractor(BaseExtractor):
             elif elem.tag == _TBL:
                 text_parts.append(_table_text(elem))
 
+        # В некоторых шаблонах блок «В результате голосования» может быть оформлен
+        # так, что конкретная фраза не попадает в распознанный текст (переносы/разделение).
+        # При этом итог всегда заканчивается «Решение принято…» (в т.ч. единогласно),
+        # поэтому учитываем наличие «голосования» по факту решения/конечного якоря.
+        if not has_voting and (has_decision or has_end):
+            has_voting = True
+
         confidence = self.calculate_confidence(
             has_start=True,
             has_table=has_table,

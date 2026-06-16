@@ -3,11 +3,12 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from typing import Optional
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QMainWindow, QTabWidget, QWidget, QVBoxLayout,
     QHBoxLayout, QPushButton, QProgressBar, QLabel,
-    QFileDialog, QMessageBox, QFrame, QSizePolicy,
+    QFileDialog, QMessageBox, QFrame, QSizePolicy, QLineEdit,
 )
 from PySide6.QtCore import Qt, QThread, Signal, QObject
 
@@ -24,7 +25,7 @@ from ..models.protocol_header import ProtocolHeader
 from ..models.workspace_state import WorkspaceStateStore
 from ..utils.russian import format_files_count
 from ..builders.protocol_builder import build_protocol
-from ..utils.windows_installer import output_dir
+from ..utils.windows_installer import output_dir, set_output_dir
 
 
 class _AppTabWidget(QTabWidget):
@@ -258,6 +259,50 @@ class MainWindow(QMainWindow):
         info_layout.addWidget(info_lbl)
         outer_layout.addWidget(info_card)
 
+        # Output directory selector (documents)
+        out_card = QFrame()
+        out_card.setStyleSheet("""
+            QFrame {
+                background: #FFFFFF;
+                border: 1.5px solid #E0E4F0;
+                border-radius: 10px;
+                padding: 4px;
+            }
+        """)
+        out_layout = QHBoxLayout(out_card)
+        out_layout.setContentsMargins(16, 12, 16, 12)
+        out_layout.setSpacing(12)
+
+        out_label = QLabel('Папка для итоговых документов:')
+        out_label.setStyleSheet('color: #3730A3; font-size: 13px; font-weight: 600;')
+        out_layout.addWidget(out_label)
+
+        self.output_dir_edit = QLineEdit(str(output_dir()))
+        self.output_dir_edit.setReadOnly(True)
+        self.output_dir_edit.setMinimumWidth(340)
+        out_layout.addWidget(self.output_dir_edit, 1)
+
+        choose_btn = QPushButton('Выбрать…')
+        choose_btn.setFixedHeight(36)
+        from .styles import apply_secondary_button as _apply_secondary_button
+        _apply_secondary_button(choose_btn)
+        out_layout.addWidget(choose_btn)
+
+        def _choose_output_dir() -> None:
+            start = self.output_dir_edit.text().strip() or str(output_dir())
+            chosen = QFileDialog.getExistingDirectory(self, 'Выберите папку для сохранения документов', start)
+            if not chosen:
+                return
+            try:
+                os.makedirs(chosen, exist_ok=True)
+            except OSError:
+                pass
+            set_output_dir(Path(chosen))
+            self.output_dir_edit.setText(chosen)
+
+        choose_btn.clicked.connect(_choose_output_dir)
+        outer_layout.addWidget(out_card)
+
         # Build button
         self.btn_build = QPushButton('  Сформировать протокол')
         self.btn_build.setFixedHeight(48)
@@ -274,10 +319,9 @@ class MainWindow(QMainWindow):
         self.build_history = BuildHistoryWidget()
         self.build_history.setSizePolicy(
             QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Maximum,
+            QSizePolicy.Policy.Preferred,
         )
         outer_layout.addWidget(self.build_history)
-        outer_layout.addStretch()
 
         self.btn_build.clicked.connect(self._start_build)
         return outer

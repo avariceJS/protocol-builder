@@ -7,10 +7,11 @@ import shutil
 from datetime import datetime
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontMetrics
+from PySide6.QtGui import QFontMetrics, QPalette, QColor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QScrollArea, QFileDialog, QMessageBox, QSizePolicy,
+    QFrame, QScrollArea, QFileDialog, QSizePolicy,
+    QDialog,
 )
 
 from ..models.protocol_history import ProtocolHistoryEntry, ProtocolHistoryStore
@@ -37,6 +38,23 @@ QPushButton {
     padding: 5px 12px;
     font-size: 12px;
     border-radius: 6px;
+}
+"""
+
+_HISTORY_VISIBLE_ROWS = 4
+
+_CONFIRM_DIALOG_STYLE = """
+QDialog#confirmDeleteDialog {
+    background: #FFFFFF;
+}
+QDialog#confirmDeleteDialog QLabel {
+    background: transparent;
+    border: none;
+}
+QDialog#confirmDeleteDialog QFrame#confirmDeletePath {
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
 }
 """
 
@@ -80,6 +98,91 @@ class _DocBadge(QLabel):
                 letter-spacing: 0.4px;
             }
         """)
+
+
+class _ConfirmDeleteDialog(QDialog):
+    def __init__(
+        self,
+        parent: QWidget,
+        *,
+        file_name: str,
+        file_path: str,
+        delete_from_disk: bool,
+    ):
+        super().__init__(parent)
+        self.setObjectName('confirmDeleteDialog')
+        self.setWindowTitle('Удалить протокол')
+        self.setModal(True)
+        self.setMinimumWidth(480)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAutoFillBackground(True)
+        self.setStyleSheet(_CONFIRM_DIALOG_STYLE)
+
+        pal = self.palette()
+        pal.setColor(QPalette.ColorRole.Window, QColor('#FFFFFF'))
+        pal.setColor(QPalette.ColorRole.Base, QColor('#FFFFFF'))
+        self.setPalette(pal)
+
+        icon_lbl = QLabel('🗑')
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setFixedSize(44, 44)
+        icon_lbl.setStyleSheet("""
+            QLabel {
+                background: #FFF1F2;
+                border: 1px solid #FECDD3;
+                border-radius: 22px;
+                font-size: 20px;
+            }
+        """)
+
+        title_lbl = QLabel('Удалить протокол?')
+        apply_plain_label(title_lbl, 'font-size: 16px; font-weight: 700;', '#1E1B4B')
+
+        if delete_from_disk:
+            body_lbl = QLabel(
+                f'Файл «{file_name}» будет удалён из истории и с диска. '
+                'Это действие нельзя отменить.'
+            )
+        else:
+            body_lbl = QLabel(
+                f'Файл «{file_name}» уже отсутствует на диске. '
+                'Убрать запись из истории?'
+            )
+        body_lbl.setWordWrap(True)
+        apply_plain_label(body_lbl, 'font-size: 13px; line-height: 1.4;', '#4B5563')
+
+        path_frame = QFrame()
+        path_frame.setObjectName('confirmDeletePath')
+        path_frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        path_layout = QVBoxLayout(path_frame)
+        path_layout.setContentsMargins(12, 10, 12, 10)
+        path_lbl = QLabel(file_path)
+        path_lbl.setWordWrap(True)
+        apply_plain_label(path_lbl, 'font-size: 11px;', '#64748B')
+        path_layout.addWidget(path_lbl)
+
+        self.btn_yes = QPushButton('Удалить')
+        apply_danger_button(self.btn_yes)
+        self.btn_no = QPushButton('Отмена')
+        apply_secondary_button(self.btn_no)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(self.btn_no)
+        btn_row.addWidget(self.btn_yes)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 20)
+        layout.setSpacing(12)
+        layout.addWidget(icon_lbl, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(title_lbl)
+        layout.addWidget(body_lbl)
+        layout.addWidget(path_frame)
+        layout.addSpacing(4)
+        layout.addLayout(btn_row)
+
+        self.btn_yes.clicked.connect(self.accept)
+        self.btn_no.clicked.connect(self.reject)
 
 
 class _HistoryEntryRow(QFrame):
@@ -238,22 +341,13 @@ class _HistoryEntryRow(QFrame):
             shutil.copy2(self._entry.path, dest)
 
     def _delete_entry(self) -> None:
-        if self._entry.exists:
-            text = (
-                f'Удалить «{self._entry.file_name}» из истории и с диска?\n\n'
-                f'{self._entry.path}'
-            )
-        else:
-            text = f'Файл уже отсутствует. Убрать «{self._entry.file_name}» из истории?'
-
-        answer = QMessageBox.question(
-            self,
-            'Удалить протокол',
-            text,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+        dialog = _ConfirmDeleteDialog(
+            parent=self.window(),
+            file_name=self._entry.file_name,
+            file_path=self._entry.path,
+            delete_from_disk=self._entry.exists,
         )
-        if answer != QMessageBox.StandardButton.Yes:
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         self._on_delete(self._entry.id, delete_file=self._entry.exists)
 
@@ -288,7 +382,10 @@ class BuildHistoryWidget(QWidget):
         header.setSpacing(8)
 
         title = QLabel('История сформированных протоколов')
+        title.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        title.setAutoFillBackground(False)
         apply_plain_label(title, 'font-size: 14px; font-weight: 700;', '#1E1B4B')
+        title.setStyleSheet('background: transparent; padding: 0; margin: 0; border: none;')
         header.addWidget(title)
         header.addStretch()
 
@@ -313,14 +410,25 @@ class BuildHistoryWidget(QWidget):
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._scroll.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Preferred,
         )
-        self._scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
+        self._scroll.setStyleSheet("""
+            QScrollArea {
+                background: #FFFFFF;
+                border: none;
+            }
+            QWidget#historyListHost {
+                background: #FFFFFF;
+            }
+        """)
 
         self._list_host = QWidget()
-        self._list_host.setStyleSheet('background: transparent;')
+        self._list_host.setObjectName('historyListHost')
+        self._list_host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._list_host.setStyleSheet('background: #FFFFFF;')
         self._list_layout = QVBoxLayout(self._list_host)
         self._list_layout.setContentsMargins(0, 0, 0, 0)
         self._list_layout.setSpacing(8)
@@ -384,19 +492,31 @@ class BuildHistoryWidget(QWidget):
 
         layout.addWidget(self._panel)
 
+    def _visible_rows_height(self, rows: int) -> int:
+        if rows <= 0:
+            return self._empty_frame.sizeHint().height()
+        # Важно: используем ту же оценку высоты карточки, что и в content_h,
+        # иначе можно увидеть больше/меньше нужного количества элементов.
+        row_h = self._rows[0].sizeHint().height() if self._rows else 96
+        spacing = self._list_layout.spacing()
+        # Небольшой запас вниз убираем, чтобы карточки "не ехали" за границу.
+        return rows * row_h + max(0, rows - 1) * spacing - 4
+
     def _update_scroll_height(self) -> None:
         entries = len(self._rows)
         if entries == 0:
-            self._scroll.setMinimumHeight(self._empty_frame.sizeHint().height())
-            self._scroll.setMaximumHeight(16777215)
+            empty_h = self._empty_frame.sizeHint().height()
+            self._scroll.setMinimumHeight(empty_h)
+            self._scroll.setMaximumHeight(empty_h)
             return
 
         row_height = self._rows[0].sizeHint().height() if self._rows else 96
         spacing = self._list_layout.spacing()
         content_h = entries * row_height + max(0, entries - 1) * spacing + 4
-        max_visible = min(content_h, 320)
-        self._scroll.setMinimumHeight(max_visible)
-        self._scroll.setMaximumHeight(max_visible if content_h > 320 else 16777215)
+        max_visible = self._visible_rows_height(_HISTORY_VISIBLE_ROWS)
+        viewport_h = min(content_h, max_visible)
+        self._scroll.setMinimumHeight(viewport_h)
+        self._scroll.setMaximumHeight(viewport_h)
 
     def add_entry(self, path: str) -> ProtocolHistoryEntry:
         entry = self._store.add(path)
@@ -443,6 +563,9 @@ class BuildHistoryWidget(QWidget):
             self._list_layout.addWidget(row)
 
         self._update_scroll_height()
+        self._list_host.adjustSize()
+        self._scroll.verticalScrollBar().setValue(0)
+        self._scroll.update()
 
     def _delete_entry(self, entry_id: str, *, delete_file: bool) -> None:
         self._store.remove(entry_id, delete_file=delete_file)
