@@ -42,9 +42,10 @@ jobs:
         run: choco install innosetup -y --no-progress
 
       - name: Build installer (Setup.exe)
+        shell: pwsh
         run: |
-          if not exist installer_output mkdir installer_output
-          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\ProtocolBuilder.iss
+          New-Item -ItemType Directory -Force -Path installer_output | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\ProtocolBuilder.iss
 
       - name: Upload portable EXE
         uses: actions/upload-artifact@v4
