@@ -9,8 +9,10 @@ on:
     branches: [main, master]
     paths:
       - 'src/**'
+      - 'assets/**'
       - 'build.spec'
       - 'requirements.txt'
+      - 'installer/**'
       - '.github/workflows/build-windows.yml'
 
 jobs:
@@ -36,10 +38,26 @@ jobs:
       - name: Build EXE (PyInstaller)
         run: pyinstaller build.spec --clean --noconfirm
 
-      - name: Upload EXE artifact
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer (Setup.exe)
+        run: |
+          if not exist installer_output mkdir installer_output
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\ProtocolBuilder.iss
+
+      - name: Upload portable EXE
         uses: actions/upload-artifact@v4
         with:
-          name: ProtokolSbornshchik-Windows
+          name: ProtokolSbornshchik-Windows-Portable
           path: dist/ПротоколСборщик.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProtokolSbornshchik-Windows-Setup
+          path: installer_output/ПротоколСборщик_Setup.exe
           if-no-files-found: error
           retention-days: 30

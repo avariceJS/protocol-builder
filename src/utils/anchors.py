@@ -33,3 +33,9 @@ def is_end_anchor(text: str) -> bool:
 def extract_point_number(text: str) -> str:
     m = re.match(r'(1\.\d+\.)', text.strip())
     return m.group(1) if m else ''
+
+
+def point_sort_key(number: str) -> int:
+    """Numeric sub-index for sorting 1.6 before 1.30."""
+    m = re.match(r'1\.(\d+)\.', (number or '').strip())
+    return int(m.group(1)) if m else 10**9

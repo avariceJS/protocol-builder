@@ -7,7 +7,7 @@ from typing import Optional
 from PySide6.QtWidgets import (
     QMainWindow, QTabWidget, QWidget, QVBoxLayout,
     QHBoxLayout, QPushButton, QProgressBar, QLabel,
-    QFileDialog, QMessageBox, QStatusBar, QFrame,
+    QFileDialog, QMessageBox, QFrame, QSizePolicy,
 )
 from PySide6.QtCore import Qt, QThread, Signal, QObject
 
@@ -15,9 +15,27 @@ from .file_list_widget import FileListWidget, SUPPORTED_EXT
 from .preview_widget import PreviewWidget
 from .header_form import HeaderForm
 from .build_history_widget import BuildHistoryWidget
-from .styles import apply_header_bar, apply_primary_button, style_header_title, style_header_subtitle, style_header_status
+from .styles import (
+    apply_header_bar, apply_app_chrome, apply_app_tabs, apply_primary_button,
+    style_header_title, style_header_subtitle, style_header_status,
+)
 from ..models.fragment import Fragment, FragmentStatus
+from ..models.protocol_header import ProtocolHeader
+from ..models.workspace_state import WorkspaceStateStore
+from ..utils.russian import format_files_count
 from ..builders.protocol_builder import build_protocol
+
+
+class _AppTabWidget(QTabWidget):
+    """Вкладки на всю ширину, встроенные в шапку приложения."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDocumentMode(True)
+        bar = self.tabBar()
+        bar.setDrawBase(False)
+        bar.setExpanding(True)
+        bar.setUsesScrollButtons(False)
 
 
 class _ExtractionWorker(QObject):
@@ -83,16 +101,15 @@ class _BuildWorker(QObject):
 
 
 class _HeaderBar(QWidget):
-    """Top header with app title and status."""
+    """Title row inside the app chrome."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(64)
         self.setObjectName('headerBar')
         apply_header_bar(self)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setContentsMargins(24, 20, 24, 0)
 
         title = QLabel('Сборщик протокола')
         style_header_title(title)
@@ -100,26 +117,52 @@ class _HeaderBar(QWidget):
         style_header_subtitle(subtitle)
 
         text_col = QVBoxLayout()
-        text_col.setSpacing(1)
+        text_col.setSpacing(3)
         text_col.addWidget(title)
         text_col.addWidget(subtitle)
         layout.addLayout(text_col)
         layout.addStretch()
 
+        self._status_badge = QFrame()
+        self._status_badge.setObjectName('statusBadge')
+        self._status_badge.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        badge_layout = QHBoxLayout(self._status_badge)
+        badge_layout.setContentsMargins(10, 5, 12, 5)
+        badge_layout.setSpacing(6)
+
         self._status_dot = QLabel('●')
-        self._status_dot.setStyleSheet('font-size: 10px; background: transparent;')
+        self._status_dot.setStyleSheet('font-size: 8px; background: transparent;')
         self._status_text = QLabel('Готов к работе')
         style_header_status(self._status_text)
-        layout.addWidget(self._status_dot)
-        layout.addWidget(self._status_text)
+        badge_layout.addWidget(self._status_dot)
+        badge_layout.addWidget(self._status_text)
+        layout.addWidget(self._status_badge, alignment=Qt.AlignmentFlag.AlignVCenter)
+        self._set_badge_state(active=False)
+
+    def _set_badge_state(self, active: bool):
+        if active:
+            self._status_badge.setStyleSheet("""
+                QFrame#statusBadge {
+                    background: #FFFBEB;
+                    border: 1px solid #FDE68A;
+                    border-radius: 16px;
+                }
+            """)
+            self._status_dot.setStyleSheet('color: #D97706; font-size: 8px; background: transparent;')
+        else:
+            self._status_badge.setStyleSheet("""
+                QFrame#statusBadge {
+                    background: #ECFDF5;
+                    border: 1px solid #A7F3D0;
+                    border-radius: 16px;
+                }
+            """)
+            self._status_dot.setStyleSheet('color: #059669; font-size: 8px; background: transparent;')
 
     def set_status(self, text: str, active: bool = False):
-        color = '#D97706' if active else '#059669'
-        self._status_dot.setStyleSheet(
-            f'color: {color}; font-size: 10px; background: transparent;'
-        )
         self._status_text.setText(text)
         style_header_status(self._status_text)
+        self._set_badge_state(active)
 
 
 class MainWindow(QMainWindow):
@@ -130,7 +173,11 @@ class MainWindow(QMainWindow):
         self._fragments = []  # type: list[Fragment]
         self._ext_thread = None  # type: Optional[QThread]
         self._build_thread = None  # type: Optional[QThread]
+        self._workspace_store = WorkspaceStateStore()
+        self._saved_frag_meta: dict[str, Fragment] = {}
+        self._restoring = False
         self._build()
+        self._restore_workspace()
 
     def _build(self):
         central = QWidget()
@@ -139,42 +186,45 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        # Header bar
+        # Заголовок
+        chrome = QWidget()
+        chrome.setObjectName('appChrome')
+        apply_app_chrome(chrome)
+        chrome_layout = QVBoxLayout(chrome)
+        chrome_layout.setContentsMargins(0, 0, 0, 0)
+        chrome_layout.setSpacing(0)
+
         self._header_bar = _HeaderBar()
-        root_layout.addWidget(self._header_bar)
+        chrome_layout.addWidget(self._header_bar)
 
-        # Tab container
-        tab_container = QWidget()
-        tab_container.setStyleSheet('background: #F0F2F8;')
-        tab_layout = QVBoxLayout(tab_container)
-        tab_layout.setContentsMargins(0, 0, 0, 0)
-        tab_layout.setSpacing(0)
+        self.tabs = _AppTabWidget()
+        self.tabs.setObjectName('appTabs')
+        apply_app_tabs(self.tabs)
+        chrome_layout.addWidget(self.tabs, stretch=1)
 
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
-        tab_layout.addWidget(self.tabs)
-        root_layout.addWidget(tab_container)
+        root_layout.addWidget(chrome, stretch=1)
 
         # Tab 1: Files
         self.file_widget = FileListWidget()
-        self.tabs.addTab(self.file_widget, '  Файлы  ')
+        self.tabs.addTab(self.file_widget, 'Файлы')
         self.file_widget.process_requested.connect(self._start_extraction)
         self.file_widget.files_changed.connect(self._sync_fragments)
+        self.file_widget.files_changed.connect(self._save_workspace)
 
         # Tab 2: Header
         self.header_form = HeaderForm()
         self.header_form.btn_autofill.clicked.connect(self._autofill_header)
-        self.tabs.addTab(self.header_form, '  Шапка  ')
+        self.header_form.changed.connect(self._save_workspace)
+        self.tabs.addTab(self.header_form, 'Шапка')
 
         # Tab 3: Preview
         self.preview_widget = PreviewWidget()
-        self.tabs.addTab(self.preview_widget, '  Предпросмотр  ')
+        self.preview_widget.exclude_toggled.connect(self._on_exclude_toggled)
+        self.tabs.addTab(self.preview_widget, 'Предпросмотр')
 
         # Tab 4: Build
         build_tab = self._make_build_tab()
-        self.tabs.addTab(build_tab, '  Сборка  ')
-
-        self.setStatusBar(QStatusBar())
+        self.tabs.addTab(build_tab, 'Сборка')
 
     def _make_build_tab(self) -> QWidget:
         outer = QWidget()
@@ -221,7 +271,12 @@ class MainWindow(QMainWindow):
 
         # History of generated protocols
         self.build_history = BuildHistoryWidget()
-        outer_layout.addWidget(self.build_history, stretch=1)
+        self.build_history.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Maximum,
+        )
+        outer_layout.addWidget(self.build_history)
+        outer_layout.addStretch()
 
         self.btn_build.clicked.connect(self._start_build)
         return outer
@@ -231,30 +286,42 @@ class MainWindow(QMainWindow):
         if self._ext_thread and self._ext_thread.isRunning():
             return
 
-        self._header_bar.set_status(f'Обработка {len(paths)} файл(ов)…', active=True)
-        self.statusBar().showMessage(f'Обработка {len(paths)} файл(ов)…')
+        self._header_bar.set_status(f'Обработка {format_files_count(len(paths))}…', active=True)
         worker = _ExtractionWorker(paths)
         thread = QThread(self)
         worker.moveToThread(thread)
         worker.fragment_ready.connect(self._on_fragment)
         worker.finished.connect(thread.quit)
+        worker.finished.connect(self._sync_fragments)
+        worker.finished.connect(self._save_workspace)
         worker.finished.connect(lambda: self._header_bar.set_status('Готово'))
-        worker.finished.connect(lambda: self.statusBar().showMessage('Готово'))
         thread.started.connect(worker.run)
         thread.start()
         self._ext_thread = thread
         self._ext_worker = worker
 
     def _on_fragment(self, frag: Fragment):
+        abs_path = os.path.abspath(frag.file_path)
+        for f in self._fragments:
+            if os.path.abspath(f.file_path) == abs_path:
+                frag.include_in_protocol = f.include_in_protocol
+                break
+        else:
+            saved = self._saved_frag_meta.get(abs_path)
+            if saved:
+                frag.include_in_protocol = saved.include_in_protocol
+
         for i, f in enumerate(self._fragments):
             if f.file_path == frag.file_path:
                 self._fragments[i] = frag
                 self.file_widget.update_fragment(frag.file_path, frag)
                 self.preview_widget.update_fragment(frag)
+                self._save_workspace()
                 return
         self._fragments.append(frag)
         self.file_widget.update_fragment(frag.file_path, frag)
         self.preview_widget.set_fragments(self._fragments)
+        self._save_workspace()
 
     def _sync_fragments(self):
         paths = self.file_widget.get_file_paths()
@@ -315,3 +382,70 @@ class MainWindow(QMainWindow):
         paths = self.file_widget.get_file_paths()
         if paths:
             self.header_form.autofill_from_docx(paths[0])
+
+    def _on_exclude_toggled(self, file_path: str, included: bool):
+        abs_path = os.path.abspath(file_path)
+        for frag in self._fragments:
+            if os.path.abspath(frag.file_path) == abs_path:
+                frag.include_in_protocol = included
+                break
+        saved = self._saved_frag_meta.get(abs_path)
+        if saved:
+            saved.include_in_protocol = included
+        self._save_workspace()
+
+    def _save_workspace(self):
+        if self._restoring:
+            return
+        paths = self.file_widget.get_file_paths()
+        if not paths:
+            self._workspace_store.clear()
+            return
+        self._workspace_store.save(
+            paths,
+            self._fragments,
+            self.header_form.get_header(),
+        )
+
+    def _restore_workspace(self):
+        state = self._workspace_store.load()
+        if not state.file_paths:
+            return
+
+        self._restoring = True
+        try:
+            self._saved_frag_meta = self._workspace_store.fragment_meta_by_path()
+            if state.header:
+                self.header_form.set_header(ProtocolHeader(**state.header))
+
+            self.file_widget.restore_paths(state.file_paths)
+
+            for path in state.file_paths:
+                abs_path = os.path.abspath(path)
+                if os.path.isfile(path):
+                    continue
+                saved = self._saved_frag_meta.get(abs_path)
+                frag = Fragment(
+                    file_path=path,
+                    original_number=saved.original_number if saved else '',
+                    assigned_number=saved.assigned_number if saved else '',
+                    status=FragmentStatus.ERROR,
+                    confidence=saved.confidence if saved else 0,
+                    text_preview=saved.text_preview if saved else '',
+                    warnings=list(saved.warnings) if saved else [],
+                    error_message='Файл не найден на диске',
+                    include_in_protocol=saved.include_in_protocol if saved else True,
+                    source_type=saved.source_type if saved else 'docx',
+                )
+                self.file_widget.update_fragment(path, frag)
+
+            self._sync_fragments()
+            paths_to_process = [p for p in state.file_paths if os.path.isfile(p)]
+            if paths_to_process:
+                self._start_extraction(paths_to_process)
+        finally:
+            self._restoring = False
+
+    def closeEvent(self, event):
+        self._save_workspace()
+        super().closeEvent(event)

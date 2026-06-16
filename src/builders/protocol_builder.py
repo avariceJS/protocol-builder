@@ -17,8 +17,7 @@ from docx.oxml import OxmlElement
 
 from ..models.fragment import Fragment, FragmentStatus
 from ..models.protocol_header import ProtocolHeader
-from ..utils.renumbering import renumber_node
-from ..utils.anchors import W_NS
+from ..utils.anchors import point_sort_key, W_NS
 
 _W = f'{{{W_NS}}}'
 
@@ -43,34 +42,42 @@ def build_protocol(
 
     _bad = (FragmentStatus.NOT_FOUND, FragmentStatus.ERROR)
     included = [f for f in fragments if f.include_in_protocol and f.status not in _bad]
-    excluded = [f for f in fragments if not f.include_in_protocol or f.status in _bad]
+    problematic = [f for f in fragments if f.include_in_protocol and f.status in _bad]
+    included = _sort_by_point(included)
 
     body = doc.element.body
     sect_pr = body.find(qn('w:sectPr'))
 
-    for order_idx, frag in enumerate(included, start=1):
-        frag.assigned_number = f'1.{order_idx}.'
+    for frag in included:
+        frag.assigned_number = frag.original_number
         if frag.source_type == 'docx' and frag.xml_nodes:
             nodes = [copy.deepcopy(n) for n in frag.xml_nodes]
-            if nodes:
-                renumber_node(nodes[0], order_idx)
             _scale_fonts(nodes, delta=4)
             _insert_nodes(body, nodes, sect_pr)
         else:
-            # For PDF/image: reconstruct as plain text
-            _add_text_fragment(doc, frag, order_idx, sect_pr)
+            _add_text_fragment(doc, frag, sect_pr)
 
         # Blank line between fragments
         _insert_nodes(body, [_blank_para()], sect_pr)
 
-    if excluded:
-        _add_problematic_section(doc, excluded, sect_pr)
+    if problematic:
+        _add_problematic_section(doc, problematic, sect_pr)
 
     doc.save(output_path)
     return output_path
 
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
+
+def _sort_by_point(fragments: List[Fragment]) -> List[Fragment]:
+    """Sort by original point number (1.6 before 1.30); keep user order for ties."""
+    return [
+        frag for _, frag in sorted(
+            enumerate(fragments),
+            key=lambda pair: (point_sort_key(pair[1].original_number), pair[0]),
+        )
+    ]
+
 
 def _insert_nodes(body, nodes, sect_pr):
     if sect_pr is not None:
@@ -166,16 +173,14 @@ def _add_header(doc: Document, hdr: ProtocolHeader):
         doc.add_paragraph()
 
 
-def _add_text_fragment(doc: Document, frag: Fragment, order_idx: int, sect_pr):
-    from ..utils.renumbering import renumber_text
+def _add_text_fragment(doc: Document, frag: Fragment, sect_pr):
     body = doc.element.body
 
     lines = frag.text_preview.splitlines()
     for line in lines:
-        renumbered = renumber_text(line, order_idx) if line.startswith('1.') else line
         p = doc.add_paragraph()
         p.paragraph_format.space_after = Pt(0)
-        run = p.add_run(renumbered)
+        run = p.add_run(line)
         run.font.name = 'Times New Roman'
         run.font.size = Pt(12)
 

@@ -9,14 +9,21 @@ from PySide6.QtWidgets import QLabel, QPushButton, QWidget
 
 HEADER_BAR_STYLE = """
 QWidget#headerBar {
-    background-color: #FFFFFF;
-    border-bottom: 1px solid #E5E7EB;
+    background-color: transparent;
+    border: none;
 }
 """
 
-HEADER_TITLE_STYLE = 'color: #1E1B4B; font-size: 18px; font-weight: 700; background: transparent;'
-HEADER_SUBTITLE_STYLE = 'color: #6B7280; font-size: 12px; background: transparent;'
-HEADER_STATUS_STYLE = 'color: #374151; font-size: 12px; background: transparent;'
+APP_CHROME_STYLE = """
+QWidget#appChrome {
+    background-color: #FFFFFF;
+    border: none;
+}
+"""
+
+HEADER_TITLE_STYLE = 'color: #1E1B4B; font-size: 20px; font-weight: 700; background: transparent; letter-spacing: -0.3px;'
+HEADER_SUBTITLE_STYLE = 'color: #94A3B8; font-size: 12px; font-weight: 400; background: transparent;'
+HEADER_STATUS_STYLE = 'color: #475569; font-size: 12px; font-weight: 500; background: transparent;'
 
 PRIMARY_BUTTON_STYLE = """
 QPushButton {
@@ -63,6 +70,45 @@ QPushButton:pressed {
 }
 """
 
+SECONDARY_BUTTON_STYLE = """
+QPushButton {
+    background-color: #F9FAFB;
+    color: #6B7280;
+    border: 1.5px solid #D1D5DB;
+    border-radius: 7px;
+    padding: 7px 16px;
+    font-size: 13px;
+    font-weight: 500;
+}
+QPushButton:hover {
+    background-color: #F3F4F6;
+    border-color: #9CA3AF;
+}
+QPushButton:pressed {
+    background-color: #E5E7EB;
+}
+"""
+
+SUCCESS_BUTTON_STYLE = """
+QPushButton {
+    background-color: #ECFDF5;
+    color: #065F46;
+    border: 1.5px solid #6EE7B7;
+    border-radius: 7px;
+    padding: 7px 16px;
+    font-size: 13px;
+    font-weight: 600;
+}
+QPushButton:hover {
+    background-color: #D1FAE5;
+    border-color: #34D399;
+    color: #064E3B;
+}
+QPushButton:pressed {
+    background-color: #A7F3D0;
+}
+"""
+
 
 def _set_label_color(label: QLabel, css: str, color: str) -> None:
     label.setStyleSheet(css)
@@ -71,13 +117,112 @@ def _set_label_color(label: QLabel, css: str, color: str) -> None:
     label.setPalette(palette)
 
 
+def apply_plain_label(label: QLabel, css: str, color: str) -> None:
+    """Label without macOS focus/frame box around text."""
+    label.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+    label.setAutoFillBackground(False)
+    label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    _set_label_color(label, css + ' border: none; outline: none; padding: 0; margin: 0;', color)
+
+
+GHOST_BUTTON_STYLE = """
+QPushButton {
+    background-color: transparent;
+    color: #4F46E5;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 500;
+}
+QPushButton:hover {
+    background-color: #EEF2FF;
+}
+QPushButton:pressed {
+    background-color: #E0E7FF;
+}
+QPushButton:disabled {
+    color: #9CA3AF;
+    background: transparent;
+}
+"""
+
+GHOST_MUTED_BUTTON_STYLE = """
+QPushButton {
+    background-color: transparent;
+    color: #6B7280;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 500;
+}
+QPushButton:hover {
+    background-color: #F3F4F6;
+    color: #374151;
+}
+QPushButton:pressed {
+    background-color: #E5E7EB;
+}
+QPushButton:disabled {
+    color: #9CA3AF;
+    background: transparent;
+}
+"""
+
+GHOST_DANGER_BUTTON_STYLE = """
+QPushButton {
+    background-color: transparent;
+    color: #BE123C;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 500;
+}
+QPushButton:hover {
+    background-color: #FFF1F2;
+}
+QPushButton:pressed {
+    background-color: #FFE4E6;
+}
+QPushButton:disabled {
+    color: #9CA3AF;
+    background: transparent;
+}
+"""
+
+
+def apply_ghost_button(button: QPushButton, variant: str = 'primary') -> None:
+    styles = {
+        'primary': ('#4F46E5', GHOST_BUTTON_STYLE),
+        'muted': ('#6B7280', GHOST_MUTED_BUTTON_STYLE),
+        'danger': ('#BE123C', GHOST_DANGER_BUTTON_STYLE),
+    }
+    color, css = styles[variant]
+    button.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    button.setAutoFillBackground(False)
+    button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    button.setFlat(True)
+    palette = button.palette()
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(color))
+    button.setPalette(palette)
+    button.setStyleSheet(css)
+
+
 def apply_header_bar(widget: QWidget) -> None:
+    widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    widget.setAutoFillBackground(False)
+    widget.setStyleSheet(HEADER_BAR_STYLE)
+
+
+def apply_app_chrome(widget: QWidget) -> None:
     widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     widget.setAutoFillBackground(True)
     palette = widget.palette()
     palette.setColor(widget.backgroundRole(), QColor('#FFFFFF'))
     widget.setPalette(palette)
-    widget.setStyleSheet(HEADER_BAR_STYLE)
+    widget.setStyleSheet(APP_CHROME_STYLE)
 
 
 def style_header_title(label: QLabel) -> None:
@@ -112,6 +257,73 @@ def apply_danger_button(button: QPushButton) -> None:
     button.setStyleSheet(DANGER_BUTTON_STYLE)
 
 
+def apply_secondary_button(button: QPushButton) -> None:
+    button.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    button.setAutoFillBackground(True)
+    palette = button.palette()
+    palette.setColor(QPalette.ColorRole.Button, QColor('#F9FAFB'))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor('#6B7280'))
+    button.setPalette(palette)
+    button.setStyleSheet(SECONDARY_BUTTON_STYLE)
+
+
+def apply_success_button(button: QPushButton) -> None:
+    button.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    button.setAutoFillBackground(True)
+    palette = button.palette()
+    palette.setColor(QPalette.ColorRole.Button, QColor('#ECFDF5'))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor('#065F46'))
+    button.setPalette(palette)
+    button.setStyleSheet(SUCCESS_BUTTON_STYLE)
+
+
+APP_TABS_STYLE = """
+QTabWidget#appTabs {
+    background-color: #FFFFFF;
+}
+QTabWidget#appTabs::pane {
+    border: none;
+    background-color: #F0F2F8;
+    top: 0px;
+}
+QTabWidget#appTabs QTabBar {
+    background: #FFFFFF;
+    border: none;
+    border-bottom: 1px solid #E8EBF0;
+}
+QTabWidget#appTabs QTabBar::tab {
+    background: transparent;
+    color: #64748B;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 11px 8px 9px 8px;
+    margin: 0;
+    border-radius: 0;
+    font-weight: 500;
+    font-size: 13px;
+}
+QTabWidget#appTabs QTabBar::tab:hover:!selected {
+    background: #F8F9FF;
+    color: #374151;
+}
+QTabWidget#appTabs QTabBar::tab:selected {
+    background: transparent;
+    color: #4F46E5;
+    border-bottom: 2px solid #4F46E5;
+    font-weight: 600;
+}
+"""
+
+
+def apply_app_tabs(widget: QWidget) -> None:
+    widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    widget.setAutoFillBackground(True)
+    palette = widget.palette()
+    palette.setColor(widget.backgroundRole(), QColor('#FFFFFF'))
+    widget.setPalette(palette)
+    widget.setStyleSheet(APP_TABS_STYLE)
+
+
 APP_STYLE = """
 /* ═══════════════════════════════════════════════════════
    Base
@@ -124,43 +336,6 @@ QWidget {
     color: #1E1B4B;
     font-family: "SF Pro Display", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
     font-size: 13px;
-}
-
-/* ═══════════════════════════════════════════════════════
-   Tab widget
-═══════════════════════════════════════════════════════ */
-QTabWidget::pane {
-    border: none;
-    background-color: #F0F2F8;
-}
-QTabWidget > QWidget {
-    background-color: #F0F2F8;
-}
-QTabWidget::tab-bar {
-    alignment: left;
-}
-QTabBar::tab {
-    background: #E0E4F0;
-    color: #6B7280;
-    border: none;
-    padding: 10px 22px;
-    margin-right: 2px;
-    border-radius: 0px;
-    font-weight: 500;
-    font-size: 13px;
-    min-width: 110px;
-}
-QTabBar::tab:first {
-    border-top-left-radius: 0px;
-}
-QTabBar::tab:hover {
-    background: #C7CEED;
-    color: #1E1B4B;
-}
-QTabBar::tab:selected {
-    background: #4F46E5;
-    color: #FFFFFF;
-    font-weight: 600;
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -357,17 +532,6 @@ QSplitter::handle {
 }
 QSplitter::handle:hover {
     background: #6366F1;
-}
-
-/* ═══════════════════════════════════════════════════════
-   Status bar
-═══════════════════════════════════════════════════════ */
-QStatusBar {
-    background: #EEF2FF;
-    color: #4B5563;
-    border-top: 1px solid #C7D2FE;
-    font-size: 12px;
-    padding: 2px 8px;
 }
 
 /* ═══════════════════════════════════════════════════════

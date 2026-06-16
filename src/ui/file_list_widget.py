@@ -2,12 +2,14 @@ import os
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QLabel, QFileDialog,
-    QAbstractItemView, QHeaderView, QFrame,
+    QAbstractItemView, QHeaderView, QFrame, QMenu, QStyleFactory,
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QFont
+from PySide6.QtCore import Qt, Signal, QSize, QPoint
+from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QIcon, QPixmap, QCursor, QPainterPath, QRegion
 
 from ..models.fragment import Fragment, FragmentStatus
+from ..utils.assets import asset_path
+from ..utils.russian import format_files_count
 from .styles import STATUS_PALETTE, apply_primary_button, apply_danger_button
 
 # (bg, text, border) per status
@@ -20,9 +22,93 @@ _STATUS_COLORS = {
 
 SUPPORTED_EXT = {'.docx', '.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
 
+_ICON_BUTTON_STYLE = """
+QPushButton {
+    background: #F3F4F6;
+    border: 1px solid #E5E7EB;
+    border-radius: 6px;
+    padding: 4px;
+}
+QPushButton:hover {
+    background: #E5E7EB;
+    border-color: #D1D5DB;
+}
+QPushButton:pressed {
+    background: #D1D5DB;
+}
+"""
+
+_DROP_ZONE_MENU_STYLE = """
+QMenu#dropZoneMenu {
+    background-color: #FFFFFF;
+    color: #1E1B4B;
+    border: 1px solid #E0E4F0;
+    border-radius: 8px;
+    padding: 6px;
+    outline: none;
+}
+QMenu#dropZoneMenu::item {
+    background-color: transparent;
+    color: #374151;
+    padding: 8px 32px 8px 14px;
+    margin: 2px 0;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    border: none;
+    outline: none;
+}
+QMenu#dropZoneMenu::item:selected {
+    background-color: #EEF2FF;
+    color: #4338CA;
+}
+QMenu#dropZoneMenu::item:disabled {
+    color: #9CA3AF;
+}
+"""
+
+_MENU_CORNER_RADIUS = 8
+
+
+def _icon_button(icon_name: str, tooltip: str) -> QPushButton:
+    btn = QPushButton()
+    btn.setIcon(QIcon(asset_path(icon_name)))
+    btn.setIconSize(QSize(16, 16))
+    btn.setFixedSize(38, 38)
+    btn.setToolTip(tooltip)
+    btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+    btn.setStyleSheet(_ICON_BUTTON_STYLE)
+    return btn
+
+
+def _apply_rounded_menu_mask(menu: QMenu) -> None:
+    radius = _MENU_CORNER_RADIUS
+    rect = menu.rect()
+    path = QPainterPath()
+    path.addRoundedRect(
+        float(rect.x()), float(rect.y()),
+        float(rect.width()), float(rect.height()),
+        radius, radius,
+    )
+    menu.setMask(QRegion(path.toFillPolygon().toPolygon()))
+
+
+def _configure_drop_zone_menu(menu: QMenu) -> None:
+    menu.setObjectName('dropZoneMenu')
+    menu.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+    menu.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+    menu.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
+    fusion = QStyleFactory.create('Fusion')
+    if fusion:
+        menu.setStyle(fusion)
+    menu.setStyleSheet(_DROP_ZONE_MENU_STYLE)
+    menu.aboutToShow.connect(_apply_rounded_menu_mask)
+
 
 class _DropZone(QFrame):
     files_dropped = Signal(list)
+    clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,16 +129,23 @@ class _DropZone(QFrame):
             }
         """
         self.setStyleSheet(self._idle_style)
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        icon = QLabel('⇩')
-        icon.setStyleSheet('font-size: 22px; color: #6366F1; background: transparent; border: none;')
+        icon = QLabel()
+        pixmap = QPixmap(asset_path('downArrowDropZone.png'))
+        icon.setPixmap(pixmap.scaled(
+            30, 30,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ))
+        icon.setStyleSheet('background: transparent; border: none;')
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon.setFixedWidth(44)
 
-        text = QLabel('Перетащите файлы сюда  (DOCX · PDF · JPG · PNG)')
+        text = QLabel('Перетащите или нажмите для выбора  (DOCX · PDF · JPG · PNG)')
         text.setStyleSheet('color: #6366F1; font-size: 13px; font-weight: 500; background: transparent; border: none;')
 
         layout.addStretch()
@@ -81,6 +174,19 @@ class _DropZone(QFrame):
                 paths.append(p)
         if paths:
             self.files_dropped.emit(paths)
+
+    def enterEvent(self, event):
+        self.setStyleSheet(self._hover_style)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.setStyleSheet(self._idle_style)
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
 
 
 class _StatBadge(QLabel):
@@ -132,12 +238,8 @@ class FileListWidget(QWidget):
         self.btn_add_folder = QPushButton('+ Добавить папку')
         self.btn_clear = QPushButton('Очистить')
         apply_danger_button(self.btn_clear)
-        self.btn_up = QPushButton('↑')
-        self.btn_down = QPushButton('↓')
-        self.btn_up.setFixedWidth(38)
-        self.btn_down.setFixedWidth(38)
-        self.btn_up.setToolTip('Переместить вверх')
-        self.btn_down.setToolTip('Переместить вниз')
+        self.btn_up = _icon_button('upArrow.png', 'Переместить вверх')
+        self.btn_down = _icon_button('downArrow.png', 'Переместить вниз')
 
         toolbar.addWidget(self.btn_add_files)
         toolbar.addWidget(self.btn_add_folder)
@@ -150,6 +252,7 @@ class FileListWidget(QWidget):
         # Drop zone
         self.drop_zone = _DropZone()
         self.drop_zone.files_dropped.connect(self._add_paths)
+        self.drop_zone.clicked.connect(self._pick_files_or_folder)
         layout.addWidget(self.drop_zone)
 
         # Table
@@ -224,7 +327,25 @@ class FileListWidget(QWidget):
     def get_fragments(self) -> list[Fragment]:
         return [self._frag_map[p] for p in self._file_paths if p in self._frag_map]
 
+    def restore_paths(self, paths: list[str]) -> None:
+        self._file_paths = list(paths)
+        self._frag_map.clear()
+        self._refresh_table()
+
     # ── private ────────────────────────────────────────────────────────────
+    def _pick_files_or_folder(self):
+        menu = QMenu(self)
+        _configure_drop_zone_menu(menu)
+        act_files = menu.addAction('Выбрать файлы…')
+        act_folder = menu.addAction('Выбрать папку…')
+        center = self.drop_zone.rect().center()
+        pos = self.drop_zone.mapToGlobal(QPoint(int(center.x()), int(center.y())))
+        chosen = menu.exec(pos)
+        if chosen == act_files:
+            self._add_files()
+        elif chosen == act_folder:
+            self._add_folder()
+
     def _add_files(self):
         paths, _ = QFileDialog.getOpenFileNames(
             self, 'Выберите файлы', '',
@@ -292,7 +413,8 @@ class FileListWidget(QWidget):
         self.table.setItem(i, 0, _item(str(i + 1), center=True))
         self.table.setItem(i, 1, _item(os.path.basename(fp)))
         self.table.setItem(i, 2, _item(ext, center=True))
-        self.table.setItem(i, 3, _item(f'1.{i + 1}.', center=True))
+        point = frag.original_number if frag else ''
+        self.table.setItem(i, 3, _item(point or '—', center=True))
 
         if frag:
             colors = _STATUS_COLORS.get(frag.status)
@@ -327,7 +449,7 @@ class FileListWidget(QWidget):
         ok = sum(1 for f in frags if f.status == FragmentStatus.SUCCESS)
         review = sum(1 for f in frags if f.status == FragmentStatus.NEEDS_REVIEW)
         err = sum(1 for f in frags if f.status in (FragmentStatus.NOT_FOUND, FragmentStatus.ERROR))
-        self._total_lbl.setText(f'{total} файл{"ов" if total != 1 else ""}')
+        self._total_lbl.setText(format_files_count(total))
         self._badge_ok.set_count(ok)
         self._badge_review.set_count(review)
         self._badge_err.set_count(err)

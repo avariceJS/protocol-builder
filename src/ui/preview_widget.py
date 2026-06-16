@@ -2,13 +2,18 @@ import os
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QListWidget, QListWidgetItem, QTextEdit, QLabel,
-    QPushButton, QFrame,
+    QPushButton, QFrame, QStyledItemDelegate,
+    QStyleOptionViewItem,
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtGui import QColor, QFont, QBrush, QPainter
 
 from ..models.fragment import Fragment, FragmentStatus
-from .styles import STATUS_PALETTE, apply_danger_button
+from .styles import (
+    STATUS_PALETTE, apply_danger_button, apply_secondary_button, apply_success_button,
+)
+
+_STYLE_ROLE = Qt.ItemDataRole.UserRole + 1
 
 _STATUS_COLORS = {
     FragmentStatus.SUCCESS:      STATUS_PALETTE['success'],
@@ -16,6 +21,45 @@ _STATUS_COLORS = {
     FragmentStatus.NOT_FOUND:    STATUS_PALETTE['error'],
     FragmentStatus.ERROR:        STATUS_PALETTE['error'],
 }
+
+
+class _FragmentItemDelegate(QStyledItemDelegate):
+    """Рисует фон элементов списка — setBackground() не работает при QSS на macOS."""
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+
+        style_data = index.data(_STYLE_ROLE)
+        if style_data:
+            bg_hex, fg_hex = style_data
+            bg = QColor(bg_hex)
+            fg = QColor(fg_hex)
+            opt.backgroundBrush = QBrush(bg)
+            opt.palette.setBrush(opt.palette.ColorRole.Text, QBrush(fg))
+            opt.palette.setBrush(opt.palette.ColorRole.Highlight, QBrush(bg))
+            opt.palette.setBrush(opt.palette.ColorRole.HighlightedText, QBrush(fg))
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = option.rect.adjusted(2, 2, -2, -4)
+        if style_data:
+            painter.setBrush(QBrush(bg))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(rect, 6, 6)
+            painter.setPen(fg)
+            text_rect = rect.adjusted(10, 0, -10, 0)
+            painter.drawText(
+                text_rect,
+                Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextSingleLine,
+                index.data(Qt.ItemDataRole.DisplayRole) or '',
+            )
+        else:
+            super().paint(painter, opt, index)
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        return QSize(option.rect.width(), 46)
 
 
 class PreviewWidget(QWidget):
@@ -46,21 +90,20 @@ class PreviewWidget(QWidget):
         lv.addWidget(lbl_files)
 
         self.file_list = QListWidget()
+        self.file_list.setItemDelegate(_FragmentItemDelegate(self.file_list))
         self.file_list.setStyleSheet("""
             QListWidget {
                 background: #FFFFFF;
                 border: 1.5px solid #E5E7EB;
                 border-radius: 8px;
                 padding: 4px;
+                outline: none;
             }
             QListWidget::item {
-                padding: 8px 10px;
-                border-radius: 6px;
-                margin: 1px 0;
-                font-size: 12px;
+                border: none;
+                padding: 0px;
+                margin: 0px;
             }
-            QListWidget::item:hover { background: #EEF2FF; }
-            QListWidget::item:selected { background: #C7D2FE; color: #1E1B4B; }
         """)
         self.file_list.currentRowChanged.connect(self._show_fragment)
         lv.addWidget(self.file_list)
@@ -138,6 +181,7 @@ class PreviewWidget(QWidget):
         self.btn_exclude = QPushButton('Исключить из протокола')
         apply_danger_button(self.btn_exclude)
         self.btn_include = QPushButton('Включить в протокол')
+        apply_secondary_button(self.btn_include)
         btn_row.addWidget(self.btn_exclude)
         btn_row.addWidget(self.btn_include)
         btn_row.addStretch()
@@ -174,36 +218,59 @@ class PreviewWidget(QWidget):
         self._apply_item_style(item, frag)
         self.file_list.addItem(item)
 
-    def _apply_item_style(self, item: QListWidgetItem, frag: Fragment):
-        colors = _STATUS_COLORS.get(frag.status)
-        if colors:
-            bg_hex, fg_hex, _ = colors
-            item.setBackground(QColor(bg_hex))
-            item.setForeground(QColor('#9CA3AF' if not frag.include_in_protocol else fg_hex))
+    def _apply_item_style(self, item: QListWidgetItem, frag: Fragment, selected: bool = False):
         if not frag.include_in_protocol:
-            font = item.font()
-            font.setStrikeOut(True)
-            item.setFont(font)
+            bg_hex, fg_hex, _ = STATUS_PALETTE['error']
+            if selected:
+                bg_hex = '#FECDD3'
         else:
-            font = item.font()
-            font.setStrikeOut(False)
-            item.setFont(font)
+            colors = _STATUS_COLORS.get(frag.status)
+            bg_hex, fg_hex = '#FFFFFF', '#1E1B4B'
+            if colors:
+                bg_hex, fg_hex, _ = colors
+                if selected:
+                    bg_hex, fg_hex = '#C7D2FE', '#1E1B4B'
+        item.setData(_STYLE_ROLE, (bg_hex, fg_hex))
+        font = item.font()
+        font.setStrikeOut(False)
+        item.setFont(font)
+
+    def _refresh_list_styles(self):
+        current = self.file_list.currentRow()
+        for i, frag in enumerate(self._fragments):
+            item = self.file_list.item(i)
+            if item:
+                self._apply_item_style(item, frag, selected=(i == current))
+        self.file_list.viewport().update()
 
     def _update_list_item(self, i: int, frag: Fragment):
         item = self.file_list.item(i)
         if item:
-            self._apply_item_style(item, frag)
+            self._apply_item_style(item, frag, selected=(self.file_list.currentRow() == i))
+            self.file_list.viewport().update()
+
+    def _update_action_buttons(self, included: bool):
+        if included:
+            apply_danger_button(self.btn_exclude)
+            apply_secondary_button(self.btn_include)
+        else:
+            apply_secondary_button(self.btn_exclude)
+            apply_success_button(self.btn_include)
 
     def _show_fragment(self, row: int):
         if row < 0 or row >= len(self._fragments):
             return
+        self._refresh_list_styles()
         frag = self._fragments[row]
         self.lbl_name.setText(os.path.basename(frag.file_path))
 
         status_parts = [f'Статус: {frag.status.value}', f'Confidence: {frag.confidence}%']
+        if frag.original_number:
+            status_parts.append(f'Пункт: {frag.original_number}')
         if not frag.include_in_protocol:
-            status_parts.append('ИСКЛЮЧЁН')
+            status_parts.append('Исключён — не войдёт в протокол')
         self.lbl_status.setText('  ·  '.join(status_parts))
+        self._update_action_buttons(frag.include_in_protocol)
 
         # Warning/error banner
         if frag.warnings or frag.error_message:

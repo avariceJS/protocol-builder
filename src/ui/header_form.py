@@ -144,6 +144,16 @@ class HeaderForm(QWidget):
             agenda_item=self.f_agenda.toPlainText().strip(),
         )
 
+    def set_header(self, header: ProtocolHeader) -> None:
+        self.f_number.setText(header.protocol_number)
+        self.f_date.setText(header.protocol_date)
+        self.f_session.setText(header.session_name)
+        self.f_org.setText(header.organization)
+        self.f_participants.setPlainText(header.participants)
+        self.f_secretary.setText(header.secretary)
+        self.f_quorum.setPlainText(header.quorum_text)
+        self.f_agenda.setPlainText(header.agenda_item)
+
     def autofill_from_docx(self, file_path: str):
         """Try to extract header info from a DOCX выписка."""
         try:

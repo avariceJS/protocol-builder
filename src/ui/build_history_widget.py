@@ -7,6 +7,7 @@ import shutil
 from datetime import datetime
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QFileDialog, QMessageBox, QSizePolicy,
@@ -14,7 +15,30 @@ from PySide6.QtWidgets import (
 
 from ..models.protocol_history import ProtocolHistoryEntry, ProtocolHistoryStore
 from ..utils.platform_utils import open_path, reveal_path
-from .styles import apply_danger_button
+from ..utils.russian import format_files_count
+from .styles import (
+    apply_danger_button,
+    apply_plain_label,
+    apply_secondary_button,
+    apply_success_button,
+)
+
+
+_HISTORY_PANEL_STYLE = """
+QFrame#historyPanel {
+    background: #FFFFFF;
+    border: 1.5px solid #E0E4F0;
+    border-radius: 12px;
+}
+"""
+
+_COMPACT_BUTTON_EXTRA = """
+QPushButton {
+    padding: 5px 12px;
+    font-size: 12px;
+    border-radius: 6px;
+}
+"""
 
 
 def _format_created_at(iso_value: str) -> str:
@@ -26,6 +50,38 @@ def _format_created_at(iso_value: str) -> str:
         return iso_value
 
 
+def _elide_path(path: str, max_chars: int = 52) -> str:
+    if len(path) <= max_chars:
+        return path
+    folder, name = os.path.split(path)
+    if len(name) + 6 >= max_chars:
+        return '…' + name[-(max_chars - 1):]
+    budget = max_chars - len(name) - 3
+    if budget <= 0:
+        return '…' + name
+    if len(folder) <= budget:
+        return path
+    return '…' + folder[-budget:] + os.sep + name
+
+
+class _DocBadge(QLabel):
+    def __init__(self, parent=None):
+        super().__init__('DOCX', parent)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setFixedSize(40, 40)
+        self.setStyleSheet("""
+            QLabel {
+                background: #EEF2FF;
+                color: #4338CA;
+                border: 1px solid #C7D2FE;
+                border-radius: 8px;
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 0.4px;
+            }
+        """)
+
+
 class _HistoryEntryRow(QFrame):
     def __init__(self, entry: ProtocolHistoryEntry, on_delete, parent=None):
         super().__init__(parent)
@@ -35,65 +91,106 @@ class _HistoryEntryRow(QFrame):
 
     def _build(self) -> None:
         missing = not self._entry.exists
-        bg = '#FFFBEB' if missing else '#ECFDF5'
-        border = '#FCD34D' if missing else '#6EE7B7'
+        self.setObjectName('historyEntry')
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+        if missing:
+            bg, border = '#FFFBEB', '#FDE68A'
+            path_color = '#B45309'
+        else:
+            bg, border = '#F8F9FF', '#E0E7FF'
+            path_color = '#64748B'
+
         self.setStyleSheet(f"""
-            QFrame {{
+            QFrame#historyEntry {{
                 background: {bg};
-                border: 1.5px solid {border};
+                border: 1px solid {border};
                 border-radius: 10px;
+            }}
+            QFrame#historyEntry QLabel {{
+                border: none;
+                background: transparent;
+                padding: 0;
+                margin: 0;
             }}
         """)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(8)
+        root = QHBoxLayout(self)
+        root.setContentsMargins(12, 12, 14, 12)
+        root.setSpacing(12)
+
+        badge = _DocBadge()
+        if missing:
+            badge.setStyleSheet("""
+                QLabel {
+                    background: #FEF3C7;
+                    color: #B45309;
+                    border: 1px solid #FCD34D;
+                    border-radius: 8px;
+                    font-size: 10px;
+                    font-weight: 700;
+                    letter-spacing: 0.4px;
+                }
+            """)
+        root.addWidget(badge, alignment=Qt.AlignmentFlag.AlignTop)
+
+        body = QVBoxLayout()
+        body.setSpacing(4)
+        body.setContentsMargins(0, 0, 0, 0)
 
         top = QHBoxLayout()
-        top.setSpacing(12)
+        top.setSpacing(10)
 
         title = QLabel(self._entry.file_name)
-        title.setStyleSheet(
-            'font-size: 14px; font-weight: 700; color: #1E1B4B; background: transparent;'
+        apply_plain_label(
+            title,
+            'font-size: 13px; font-weight: 600;',
+            '#1E1B4B',
         )
         top.addWidget(title, stretch=1)
 
-        date_lbl = QLabel(_format_created_at(self._entry.created_at))
-        date_lbl.setStyleSheet(
-            'font-size: 12px; color: #6B7280; background: transparent;'
-        )
-        top.addWidget(date_lbl)
-        layout.addLayout(top)
+        date_chip = QLabel(_format_created_at(self._entry.created_at))
+        date_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        date_chip.setStyleSheet("""
+            QLabel {
+                background: #FFFFFF;
+                color: #64748B;
+                border: 1px solid #E2E8F0;
+                border-radius: 999px;
+                padding: 2px 10px;
+                font-size: 11px;
+                font-weight: 500;
+            }
+        """)
+        top.addWidget(date_chip, alignment=Qt.AlignmentFlag.AlignTop)
+        body.addLayout(top)
 
-        path_lbl = QLabel(self._entry.path)
-        path_lbl.setWordWrap(True)
-        path_lbl.setStyleSheet(
-            'font-size: 12px; color: #065F46; background: transparent;'
-            if not missing else
-            'font-size: 12px; color: #92400E; background: transparent;'
-        )
-        layout.addWidget(path_lbl)
+        self._path_lbl = QLabel(_elide_path(self._entry.path))
+        self._path_lbl.setToolTip(self._entry.path)
+        apply_plain_label(self._path_lbl, 'font-size: 11px;', path_color)
+        body.addWidget(self._path_lbl)
 
         if missing:
             warn = QLabel('Файл не найден на диске')
-            warn.setStyleSheet(
-                'font-size: 12px; color: #92400E; font-weight: 600; background: transparent;'
-            )
-            layout.addWidget(warn)
+            apply_plain_label(warn, 'font-size: 12px; font-weight: 500;', '#B45309')
+            body.addWidget(warn)
 
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
+        btn_row.setSpacing(6)
+        btn_row.setContentsMargins(0, 6, 0, 0)
 
         self.btn_open = QPushButton('Открыть')
-        self.btn_folder = QPushButton('Показать в папке')
-        self.btn_copy = QPushButton('Сохранить копию…')
+        self.btn_folder = QPushButton('В папке')
+        self.btn_copy = QPushButton('Копия…')
         self.btn_delete = QPushButton('Удалить')
 
-        for btn in (self.btn_open, self.btn_folder, self.btn_copy):
-            btn.setObjectName('small')
-
+        apply_success_button(self.btn_open)
+        apply_secondary_button(self.btn_folder)
+        apply_secondary_button(self.btn_copy)
         apply_danger_button(self.btn_delete)
-        self.btn_delete.setText('Удалить')
+
+        for btn in (self.btn_open, self.btn_folder, self.btn_copy, self.btn_delete):
+            btn.setStyleSheet(btn.styleSheet() + _COMPACT_BUTTON_EXTRA)
 
         self.btn_open.setEnabled(not missing)
         self.btn_folder.setEnabled(bool(self._entry.path))
@@ -102,14 +199,26 @@ class _HistoryEntryRow(QFrame):
         btn_row.addWidget(self.btn_open)
         btn_row.addWidget(self.btn_folder)
         btn_row.addWidget(self.btn_copy)
-        btn_row.addWidget(self.btn_delete)
         btn_row.addStretch()
-        layout.addLayout(btn_row)
+        btn_row.addWidget(self.btn_delete)
+        body.addLayout(btn_row)
+
+        root.addLayout(body, stretch=1)
 
         self.btn_open.clicked.connect(self._open_file)
         self.btn_folder.clicked.connect(self._open_folder)
         self.btn_copy.clicked.connect(self._save_copy)
         self.btn_delete.clicked.connect(self._delete_entry)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        metrics = QFontMetrics(self._path_lbl.font())
+        elided = metrics.elidedText(
+            self._entry.path,
+            Qt.TextElideMode.ElideMiddle,
+            max(self._path_lbl.width(), 120),
+        )
+        self._path_lbl.setText(elided)
 
     def _open_file(self) -> None:
         if self._entry.exists:
@@ -164,61 +273,130 @@ class BuildHistoryWidget(QWidget):
     def _build(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(0)
+
+        self._panel = QFrame()
+        self._panel.setObjectName('historyPanel')
+        self._panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._panel.setStyleSheet(_HISTORY_PANEL_STYLE)
+
+        panel_layout = QVBoxLayout(self._panel)
+        panel_layout.setContentsMargins(16, 14, 16, 14)
+        panel_layout.setSpacing(12)
 
         header = QHBoxLayout()
+        header.setSpacing(8)
+
         title = QLabel('История сформированных протоколов')
-        title.setStyleSheet(
-            'font-size: 14px; font-weight: 700; color: #1E1B4B; background: transparent;'
-        )
-        self._count_lbl = QLabel('')
-        self._count_lbl.setStyleSheet(
-            'font-size: 12px; color: #6B7280; background: transparent;'
-        )
+        apply_plain_label(title, 'font-size: 14px; font-weight: 700;', '#1E1B4B')
         header.addWidget(title)
         header.addStretch()
+
+        self._count_lbl = QLabel('')
+        self._count_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._count_lbl.setStyleSheet("""
+            QLabel {
+                background: #EEF2FF;
+                color: #4338CA;
+                border: 1px solid #C7D2FE;
+                border-radius: 999px;
+                padding: 2px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+        """)
+        self._count_lbl.setVisible(False)
         header.addWidget(self._count_lbl)
-        layout.addLayout(header)
+        panel_layout.addLayout(header)
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
         self._scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
 
         self._list_host = QWidget()
         self._list_host.setStyleSheet('background: transparent;')
         self._list_layout = QVBoxLayout(self._list_host)
         self._list_layout.setContentsMargins(0, 0, 0, 0)
-        self._list_layout.setSpacing(10)
+        self._list_layout.setSpacing(8)
 
-        self._empty_lbl = QLabel('Пока нет сформированных протоколов')
-        self._empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_lbl.setStyleSheet(
-            'color: #9CA3AF; font-size: 13px; padding: 24px; background: transparent;'
-        )
-        self._empty_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._empty_frame = QFrame()
+        self._empty_frame.setObjectName('historyEmpty')
+        self._empty_frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._empty_frame.setStyleSheet("""
+            QFrame#historyEmpty {
+                background: #F8F9FF;
+                border: 1.5px dashed #C7D2FE;
+                border-radius: 10px;
+            }
+            QFrame#historyEmpty QLabel {
+                border: none;
+                background: transparent;
+            }
+        """)
+        empty_layout = QVBoxLayout(self._empty_frame)
+        empty_layout.setContentsMargins(20, 28, 20, 28)
+        empty_layout.setSpacing(4)
+
+        empty_title = QLabel('Пока нет сформированных протоколов')
+        empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        apply_plain_label(empty_title, 'font-size: 13px; font-weight: 600;', '#6366F1')
+
+        empty_hint = QLabel('После сборки файл появится здесь — можно открыть, скопировать или удалить')
+        empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_hint.setWordWrap(True)
+        apply_plain_label(empty_hint, 'font-size: 12px;', '#94A3B8')
+
+        empty_layout.addWidget(empty_title)
+        empty_layout.addWidget(empty_hint)
 
         self._scroll.setWidget(self._list_host)
-        layout.addWidget(self._scroll, stretch=1)
+        panel_layout.addWidget(self._scroll)
 
         self._error_frame = QFrame()
         self._error_frame.setVisible(False)
+        self._error_frame.setObjectName('historyError')
+        self._error_frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._error_frame.setStyleSheet("""
-            QFrame {
+            QFrame#historyError {
                 background: #FFF1F2;
-                border: 1.5px solid #FCA5A5;
+                border: 1px solid #FECDD3;
                 border-radius: 10px;
+            }
+            QFrame#historyError QLabel {
+                border: none;
+                background: transparent;
+                padding: 0;
             }
         """)
         error_layout = QVBoxLayout(self._error_frame)
         error_layout.setContentsMargins(14, 12, 14, 12)
         self._error_label = QLabel('')
         self._error_label.setWordWrap(True)
-        self._error_label.setStyleSheet(
-            'font-size: 13px; color: #9F1239; background: transparent;'
-        )
+        apply_plain_label(self._error_label, 'font-size: 13px;', '#9F1239')
         error_layout.addWidget(self._error_label)
-        layout.addWidget(self._error_frame)
+        panel_layout.addWidget(self._error_frame)
+
+        layout.addWidget(self._panel)
+
+    def _update_scroll_height(self) -> None:
+        entries = len(self._rows)
+        if entries == 0:
+            self._scroll.setMinimumHeight(self._empty_frame.sizeHint().height())
+            self._scroll.setMaximumHeight(16777215)
+            return
+
+        row_height = self._rows[0].sizeHint().height() if self._rows else 96
+        spacing = self._list_layout.spacing()
+        content_h = entries * row_height + max(0, entries - 1) * spacing + 4
+        max_visible = min(content_h, 320)
+        self._scroll.setMinimumHeight(max_visible)
+        self._scroll.setMaximumHeight(max_visible if content_h > 320 else 16777215)
 
     def add_entry(self, path: str) -> ProtocolHistoryEntry:
         entry = self._store.add(path)
@@ -237,7 +415,7 @@ class BuildHistoryWidget(QWidget):
         while self._list_layout.count():
             item = self._list_layout.takeAt(0)
             widget = item.widget()
-            if widget and widget is not self._empty_lbl:
+            if widget and widget is not self._empty_frame:
                 widget.deleteLater()
 
     def refresh(self) -> None:
@@ -249,19 +427,22 @@ class BuildHistoryWidget(QWidget):
 
         entries = self._store.entries
         count = len(entries)
-        self._count_lbl.setText(f'{count} файл(ов)' if count else '')
+        self._count_lbl.setText(format_files_count(count) if count else '')
+        self._count_lbl.setVisible(count > 0)
 
         if not entries:
-            self._list_layout.addWidget(self._empty_lbl)
-            self._empty_lbl.show()
+            self._list_layout.addWidget(self._empty_frame)
+            self._empty_frame.show()
+            self._update_scroll_height()
             return
 
-        self._empty_lbl.hide()
+        self._empty_frame.hide()
         for entry in entries:
             row = _HistoryEntryRow(entry, self._delete_entry)
             self._rows.append(row)
             self._list_layout.addWidget(row)
-        self._list_layout.addStretch()
+
+        self._update_scroll_height()
 
     def _delete_entry(self, entry_id: str, *, delete_file: bool) -> None:
         self._store.remove(entry_id, delete_file=delete_file)

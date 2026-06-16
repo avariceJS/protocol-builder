@@ -70,13 +70,12 @@ class TestErrorStatusExcluded:
         good = DocxExtractor().extract(SAMPLE)
         review_frag = Fragment(
             file_path='/fake/partial.docx',
-            original_number='1.1.',
+            original_number='1.7.',
             assigned_number='',
             status=FragmentStatus.NEEDS_REVIEW,
             confidence=60,
-            xml_nodes=list(good.xml_nodes),
-            text_preview='1.1. Тестовый фрагмент',
-            source_type='docx',
+            text_preview='1.7. Тестовый фрагмент',
+            source_type='pdf',
         )
 
         output = str(tmp_path / 'protocol_review.docx')
@@ -94,7 +93,7 @@ class TestErrorStatusExcluded:
         all_text = ' '.join(get_para_text(e) for e in body.iter(f'{_W}p'))
 
         assert '1.1.' in all_text
-        assert '1.2.' in all_text
+        assert '1.7.' in all_text
 
 
 class TestManualExclude:
@@ -119,4 +118,33 @@ class TestManualExclude:
         all_text = ' '.join(get_para_text(e) for e in body.iter(f'{_W}p'))
 
         assert '1.1.' not in all_text
-        assert 'требующие ручной проверки' in all_text
+        assert 'требующие ручной проверки' not in all_text
+        assert 'sample_extract' not in all_text
+
+    def test_excluded_middle_preserves_original_numbers(self, tmp_path):
+        """Excluded fragments are omitted; remaining ones keep source numbering."""
+        f1 = DocxExtractor().extract(SAMPLE)
+        f2 = DocxExtractor().extract(SAMPLE)
+        f3 = DocxExtractor().extract(SAMPLE)
+        f2.file_path = '/tmp/02_excluded.docx'
+        f3.file_path = '/tmp/03_excluded.docx'
+        f2.include_in_protocol = False
+        f3.include_in_protocol = False
+
+        output = str(tmp_path / 'protocol_excluded.docx')
+        build_protocol([f1, f2, f3], ProtocolHeader(), output)
+
+        import zipfile
+        from lxml import etree
+        from src.utils.anchors import W_NS, get_para_text
+
+        with zipfile.ZipFile(output) as z:
+            xml = z.read('word/document.xml')
+        root = etree.fromstring(xml)
+        _W = f'{{{W_NS}}}'
+        body = root.find(f'.//{_W}body')
+        all_text = ' '.join(get_para_text(e) for e in body.iter(f'{_W}p'))
+
+        assert '1.1.' in all_text
+        assert '02_excluded' not in all_text
+        assert '03_excluded' not in all_text

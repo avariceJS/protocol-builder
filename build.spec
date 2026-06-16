@@ -1,9 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 # Build .exe on Windows:  pyinstaller build.spec
 # Build .app on macOS:    pyinstaller build.spec
+import os
 import sys
 
 block_cipher = None
+
+_spec_dir = os.path.dirname(os.path.abspath(SPEC))
+_win_icon = os.path.join(_spec_dir, 'assets', 'app_icon.ico')
+_mac_icon = os.path.join(_spec_dir, 'assets', 'app_icon.icns')
 
 a = Analysis(
     ['src/main.py'],
@@ -62,7 +67,7 @@ if sys.platform == 'win32':
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
-        icon=None,
+        icon=_win_icon if os.path.isfile(_win_icon) else None,
         onefile=True,
     )
 
@@ -83,7 +88,7 @@ else:
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
-        icon=None,
+        icon=_mac_icon if os.path.isfile(_mac_icon) else None,
     )
     coll = COLLECT(
         exe,
@@ -98,7 +103,7 @@ else:
     app = BUNDLE(
         coll,
         name='ПротоколСборщик.app',
-        icon=None,
+        icon=_mac_icon if os.path.isfile(_mac_icon) else None,
         bundle_identifier='ru.protocol.builder',
         info_plist={
             'CFBundleName': 'Сборщик протокола',
