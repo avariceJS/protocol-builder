@@ -15,6 +15,7 @@ AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppFolder}
 DefaultGroupName={#MyAppName}
+DisableDirPage=yes
 DisableProgramGroupPage=yes
 OutputDir=..\installer_output
 OutputBaseFilename=ПротоколСборщик_Setup
