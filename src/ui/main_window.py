@@ -24,6 +24,7 @@ from ..models.protocol_header import ProtocolHeader
 from ..models.workspace_state import WorkspaceStateStore
 from ..utils.russian import format_files_count
 from ..builders.protocol_builder import build_protocol
+from ..utils.windows_installer import output_dir
 
 
 class _AppTabWidget(QTabWidget):
@@ -337,8 +338,15 @@ class MainWindow(QMainWindow):
 
         today = date.today().strftime('%Y-%m-%d')
         default_name = f'Протокол_сформированный_{today}.docx'
+        initial_dir = str(output_dir())
+        # Создаём папку, чтобы QFileDialog стартовал в существующей директории
+        try:
+            os.makedirs(initial_dir, exist_ok=True)
+        except OSError:
+            pass
+        default_path = os.path.join(initial_dir, default_name)
         output_path, _ = QFileDialog.getSaveFileName(
-            self, 'Сохранить протокол', default_name,
+            self, 'Сохранить протокол', default_path,
             'Word Document (*.docx)'
         )
         if not output_path:

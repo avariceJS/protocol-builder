@@ -74,6 +74,7 @@ def fragment_from_saved(data: dict) -> Fragment:
 class WorkspaceStateStore:
     def __init__(self) -> None:
         self._state = WorkspaceState()
+        self.load()
 
     @property
     def state(self) -> WorkspaceState:

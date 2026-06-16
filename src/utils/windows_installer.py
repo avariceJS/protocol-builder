@@ -1,8 +1,9 @@
-"""Windows: install to LocalAppData and create desktop shortcut."""
+"""Windows: install to per-user folder, remember preferences, create shortcuts."""
 
 from __future__ import annotations
 
 import os
+import json
 import shutil
 import subprocess
 import sys
@@ -13,8 +14,74 @@ EXE_NAME = 'ПротоколСборщик.exe'
 SETTINGS_ORG = 'ProtocolBuilder'
 SETTINGS_APP = 'Сборщик протокола'
 
+CONFIG_DIR_NAME = 'ProtocolBuilder'
+CONFIG_FILE_NAME = 'config.json'
+
+CONFIG_INSTALL_DIR_KEY = 'install_dir'
+CONFIG_OUTPUT_DIR_KEY = 'output_dir'
+CONFIG_PROMPT_SKIPPED_KEY = 'install_prompt_skipped'
+
+
+def _config_path() -> Path:
+    local_app_data = os.environ.get('LOCALAPPDATA', '')
+    return Path(local_app_data) / CONFIG_DIR_NAME / CONFIG_FILE_NAME
+
+
+def _load_config() -> dict:
+    path = _config_path()
+    try:
+        if not path.is_file():
+            return {}
+        return json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_config(cfg: dict) -> None:
+    path = _config_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+    except OSError:
+        # если не можем записать настройки — приложение всё равно должно работать
+        pass
+
+
+def _documents_default_dir() -> Path:
+    user_profile = Path(os.environ.get('USERPROFILE', ''))
+    docs = user_profile / 'Documents'
+    base = docs if docs.is_dir() else user_profile
+    return base / APP_FOLDER_NAME
+
+
+def install_prompt_skipped() -> bool:
+    cfg = _load_config()
+    return bool(cfg.get(CONFIG_PROMPT_SKIPPED_KEY, False))
+
+
+def set_install_prompt_skipped(skipped: bool) -> None:
+    cfg = _load_config()
+    cfg[CONFIG_PROMPT_SKIPPED_KEY] = bool(skipped)
+    _save_config(cfg)
+
+
+def set_install_dir(path: Path) -> None:
+    cfg = _load_config()
+    cfg[CONFIG_INSTALL_DIR_KEY] = str(path)
+    _save_config(cfg)
+
+
+def set_output_dir(path: Path) -> None:
+    cfg = _load_config()
+    cfg[CONFIG_OUTPUT_DIR_KEY] = str(path)
+    _save_config(cfg)
+
 
 def install_dir() -> Path:
+    cfg = _load_config()
+    override = cfg.get(CONFIG_INSTALL_DIR_KEY)
+    if override:
+        return Path(override)
     local_app_data = os.environ.get('LOCALAPPDATA', '')
     return Path(local_app_data) / 'Programs' / APP_FOLDER_NAME
 
@@ -36,16 +103,40 @@ def is_running_from_install_dir() -> bool:
         return False
 
 
-def should_offer_install(*, prompt_skipped: bool) -> bool:
-    if not is_windows_frozen() or is_running_from_install_dir() or prompt_skipped:
+def should_offer_install(*, prompt_skipped: bool | None = None) -> bool:
+    if not is_windows_frozen() or is_running_from_install_dir():
+        return False
+    if prompt_skipped is None:
+        prompt_skipped = install_prompt_skipped()
+    if prompt_skipped:
         return False
     return True
 
 
-def install_application(*, desktop_shortcut: bool, start_menu_shortcut: bool = True) -> Path:
-    target_dir = install_dir()
+def output_dir() -> Path:
+    cfg = _load_config()
+    override = cfg.get(CONFIG_OUTPUT_DIR_KEY)
+    if override:
+        return Path(override)
+    return _documents_default_dir()
+
+
+def install_application(
+    *,
+    desktop_shortcut: bool,
+    start_menu_shortcut: bool = True,
+    custom_install_dir: Path | None = None,
+    default_output_dir: Path | None = None,
+) -> Path:
+    if custom_install_dir is not None:
+        set_install_dir(custom_install_dir)
+    if default_output_dir is not None:
+        set_output_dir(default_output_dir)
+    set_install_prompt_skipped(False)
+
+    target_dir = custom_install_dir or install_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
-    target_exe = installed_exe_path()
+    target_exe = target_dir / EXE_NAME
 
     source = Path(sys.executable).resolve()
     if source != target_exe.resolve():
