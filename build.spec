@@ -16,7 +16,6 @@ a = Analysis(
     binaries=[],
     datas=[
         ('assets', 'assets'),
-        ('samples', 'samples'),
     ],
     hiddenimports=[
         'PySide6.QtCore',

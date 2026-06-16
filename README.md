@@ -181,8 +181,8 @@ protocol-builder/
 │   ├── models/                    # Fragment, ProtocolHeader
 │   └── utils/                     # anchors, renumbering, platform_utils
 ├── tests/                         # pytest
-├── samples/                       # образец выписки
-├── assets/                        # скриншот фрагмента
+├── tests/fixtures/                # образец выписки для тестов
+├── assets/                        # иконки и UI-ресурсы
 ├── setup_mac.sh / setup_win.bat   # настройка окружения
 ├── run_mac.sh   / run_win.bat     # запуск GUI
 ├── run_tests.sh / run_tests.bat   # запуск тестов
