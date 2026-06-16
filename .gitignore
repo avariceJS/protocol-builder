@@ -1,0 +1,83 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Виртуальные окружения
+venv/
+.venv/
+env/
+.env/
+
+# Установка / packaging
+*.egg
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+share/python-wheels/
+*.manifest
+*.spec.bak
+
+# ── Тесты и линтеры ───────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.hypothesis/
+
+# ── PyInstaller ───────────────────────────────────────────────────────────────
+build/
+dist/
+*.exe
+*.app
+warn-*.txt
+
+# ── IDE и редакторы ───────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+*.sublime-project
+*.sublime-workspace
+
+# ── ОС ────────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ── Секреты и локальные настройки ─────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets.*
+
+# ── Логи и временные файлы ──────────────────────────────────────────────────────
+*.log
+*.tmp
+*.temp
+*.bak
+
+# ── Результаты работы приложения (не коммитить) ───────────────────────────────
+# Сгенерированные протоколы в корне проекта (samples/ и tests/fixtures/ — в git)
+Протокол*.docx
+
+# Случайно скопированные выписки / входные файлы пользователя
+/uploads/
+/temp/
+/tmp/
